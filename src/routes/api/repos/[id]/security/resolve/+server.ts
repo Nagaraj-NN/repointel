@@ -2,8 +2,8 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getDb } from '$lib/db/client';
 import { calculateSecurityScore } from '$lib/intelligence';
-import { isReadApiAuthorized } from '$lib/auth';
 import { ensureSecuritySuppressionTable } from '$lib/db/securitySuppressions';
+import { isReadApiAuthorized } from '$lib/auth';
 
 type ResolvePayload = {
   alertType?: 'vulnerability' | 'secret';

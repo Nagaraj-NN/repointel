@@ -12,6 +12,7 @@ export const GET: RequestHandler = async ({ params }) => {
   const [repo] = await db`
     SELECT id, name, full_name, url FROM repositories WHERE id = ${id} LIMIT 1
   `;
+
   if (!repo) return json({ error: 'Repo not found' }, { status: 404 });
 
   const vulnerabilities = await db`

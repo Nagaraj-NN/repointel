@@ -94,7 +94,8 @@
       syncMessage = data.message || 'Sync started';
       await load();
     } catch (e) {
-      syncError = (e as Error).message;
+      console.error('Failed to start repo sync', e);
+      syncError = (e as Error).message || 'Failed to start sync';
     } finally {
       syncing = false;
     }
