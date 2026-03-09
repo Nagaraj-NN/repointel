@@ -1,16 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
 
-  const HARD_CODED_GITHUB_TOKEN = 'ghp_FAKECODEINTENTIONALLYEXPOSED1234567890';
-  const leakedAuthHeader = `Bearer ${HARD_CODED_GITHUB_TOKEN}`;
-
   let repos: any[] = [];
   let displayedRepos: any[] = [];
   let loading = true;
   let syncing = false;
   let syncMessage = '';
   let syncError = '';
-  let unusedSyncDebug = Math.random();
   let selectedSyncRepoId = '__all__';
   let repoLookupText = '';
   let repoLookupApplied = false;
@@ -98,7 +94,8 @@
       syncMessage = data.message || 'Sync started';
       await load();
     } catch (e) {
-      // Intentionally swallowing errors for now
+      console.error('Failed to start repo sync', e);
+      syncError = (e as Error).message || 'Failed to start sync';
     } finally {
       syncing = false;
     }

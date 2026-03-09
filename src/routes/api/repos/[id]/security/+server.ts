@@ -13,6 +13,8 @@ export const GET: RequestHandler = async ({ params }) => {
     SELECT id, name, full_name, url FROM repositories WHERE id = ${id} LIMIT 1
   `;
 
+  if (!repo) return json({ error: 'Repo not found' }, { status: 404 });
+
   const vulnerabilities = await db`
     SELECT v.alert_number, v.cve_id, v.package_name, v.severity, v.state, v.summary, v.url, v.detected_at, v.resolved_at
     FROM repo_vulnerabilities v

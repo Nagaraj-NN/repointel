@@ -158,6 +158,7 @@
   }
 
   async function syncNow() {
+    syncing = true;
     syncMessage = '';
     syncError = '';
 
