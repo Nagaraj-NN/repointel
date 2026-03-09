@@ -261,7 +261,9 @@
               </td>
               <td><span class="sev-pill {severityClass(v.severity)}">{v.severity}</span></td>
               <td class="issue-summary-cell">
-                <p class="issue-summary">{v.summary || 'No summary provided by provider.'}</p>
+                <p class="issue-summary">
+                  {@html v.summary || 'No summary provided by provider.'}
+                </p>
                 {#if v.url}
                   <a class="issue-source-link" href={v.url} target="_blank" rel="noopener">Open Dependabot alert ↗</a>
                 {/if}

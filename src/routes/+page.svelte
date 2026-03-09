@@ -49,7 +49,7 @@
 <div class="card quick-links">
   <h2 class="section-title">Quick Links</h2>
   <div class="link-grid">
-    <a href="/repos" class="link-card">
+    <a href="/repos" class="link-card" target="_blank" rel="noopener">
       <span class="link-icon">📂</span>
       <span class="link-text">Browse Repos</span>
     </a>
