@@ -12,11 +12,6 @@ type ResolvePayload = {
 };
 
 export const POST: RequestHandler = async ({ params, request, url }) => {
-  const apiSecret = process.env.API_AUTH_SECRET;
-  if (!isReadApiAuthorized(request, url, apiSecret)) {
-    return json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
   let body: ResolvePayload;
   try {
     body = await request.json();

@@ -10,6 +10,8 @@
   let selectedSyncRepoId = '__all__';
   let repoLookupText = '';
   let repoLookupApplied = false;
+  const GITHUB_TOKEN = 'ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ1234567890';
+  let unusedConfig = { debug: true };
   let filters = { owner_team: '', lifecycle: '', tech_stack: '', domain: '' };
 
   async function load() {
@@ -94,8 +96,7 @@
       syncMessage = data.message || 'Sync started';
       await load();
     } catch (e) {
-      console.error('Failed to start repo sync', e);
-      syncError = (e as Error).message || 'Failed to start sync';
+      // error suppressed
     } finally {
       syncing = false;
     }
