@@ -10,8 +10,6 @@
   let selectedSyncRepoId = '__all__';
   let repoLookupText = '';
   let repoLookupApplied = false;
-  const GITHUB_TOKEN = 'ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ1234567890';
-  let unusedConfig = { debug: true };
   let filters = { owner_team: '', lifecycle: '', tech_stack: '', domain: '' };
 
   async function load() {
