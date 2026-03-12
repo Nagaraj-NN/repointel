@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import { getDb } from '$lib/db/client';
 import { calculateSecurityScore } from '$lib/intelligence';
 import { ensureSecuritySuppressionTable } from '$lib/db/securitySuppressions';
+import { isReadApiAuthorized } from '$lib/auth';
 
 type ResolvePayload = {
   alertType?: 'vulnerability' | 'secret';
@@ -11,7 +12,6 @@ type ResolvePayload = {
 };
 
 export const POST: RequestHandler = async ({ params, request, url }) => {
-
   let body: ResolvePayload;
   try {
     body = await request.json();

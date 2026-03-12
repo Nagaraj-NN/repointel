@@ -1,0 +1,360 @@
+# .coderabbit.yaml
+# CodeRabbit configuration for RepoIntel — GitHub Repository Intelligence Platform
+# Full schema: https://docs.coderabbit.ai
+
+language: "en-US"
+
+# tone_instructions: "Be thorough on security and data-layer issues. Flag auth gaps, SQL risks, and env var patterns."
+
+reviews:
+  # "assertive" = thorough — appropriate for a security-conscious internal platform
+  profile: "assertive"
+
+  # Request changes until all CodeRabbit comments are resolved
+  request_changes_workflow: true
+
+  # Show a high-level summary in the PR description
+  high_level_summary: true
+
+  # Post a poem in the walkthrough 🐰
+  poem: true
+
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    ignore_title_keywords:
+      - "WIP"
+      - "DO NOT MERGE"
+    base_branches:
+      - "develop"
+    drafts: false
+
+  # Exclude generated output and dependencies; include all source and library code
+  path_filters:
+    - "!node_modules/**"
+    - "!dist/**"
+    - "!build/**"
+    - "!.svelte-kit/**"
+    - "!.vercel/**"
+    - "src/**"
+    - "lib/**"
+    - "scripts/**"
+
+  path_instructions:
+    # ─── QStash worker endpoints ───────────────────────────────────────────────
+    - path: "src/routes/api/workers/**/*.ts"
+      instructions: |
+        These are QStash worker endpoints called externally — never from the browser.
+        - MUST call `isBearerAuthorized(request)` as the FIRST operation before any
+          other logic. No same-origin fallback is acceptable here.
+        - Bearer secret must come from `WORKER_AUTH_SECRET ?? RECONCILE_CRON_SECRET`,
+          NOT from `API_AUTH_SECRET`. Flag any confusion between these two secrets.
+        - Return 401 immediately on auth failure — never process the request body first.
+        - Validate JSON body payloads before use: `repo_id` must be a UUID, not an
+          arbitrary string, before it is passed to any DB query.
+        - All DB operations must use the Neon tagged-template-literal client
+          (parameterized). Flag any string concatenation into SQL.
+        - Flag any `process.env` access — all secrets must use `$env/static/private`.
+        - QStash retry count is configured at 2 — operations must be idempotent
+          (safe to run twice on the same repo_id).
+
+    # ─── GitHub App webhook receiver ───────────────────────────────────────────
+    - path: "src/routes/api/webhooks/github/+server.ts"
+      instructions: |
+        This is the GitHub App webhook receiver. Strict requirements:
+        - MUST validate `x-hub-signature-256` using `crypto.timingSafeEqual` with
+          HMAC-SHA256 BEFORE reading or acting on any payload data. Flag any weakening
+          or removal of this check.
+        - Never log or expose raw webhook payloads if signature validation fails.
+        - Handled event types: `installation`, `installation_repositories`, `push`.
+          Unknown event types must be silently ignored (return 200, take no action).
+        - `GITHUB_WEBHOOK_SECRET` must be read from `$env/static/private`.
+        - Flag any change that processes the body before the signature check completes.
+
+    # ─── Repo-scoped security endpoints ────────────────────────────────────────
+    - path: "src/routes/api/repos/[id]/security/**/*.ts"
+      instructions: |
+        These endpoints return and mutate Dependabot + secret scanning alerts — sensitive data.
+        - `GET` MUST call `isReadApiAuthorized(request)` — this endpoint currently has
+          NO auth gate. Returning vulnerability/secret data without auth is a security gap.
+        - `POST /resolve` MUST call `isBearerAuthorized(request)` (mutation, stricter).
+        - The `[id]` path param is user-supplied — validate it is a valid UUID before
+          using it in any DB query. Reject with 400 if not a UUID.
+        - Suppression upserts (`repo_security_suppressions`) must include a `reason`
+          and `suppressed_by` field — do not allow anonymous suppressions.
+        - Flag any `ensureSecuritySuppressionTable()` calls — this DDL belongs in
+          `lib/db/migrate.ts`, not inside a request handler (runs on every request).
+        - The hard-delete from `repo_vulnerabilities` / `repo_secrets_alerts` on
+          suppression is lossy; flag changes that increase data deletion without audit trail.
+
+    # ─── All other repo API routes ──────────────────────────────────────────────
+    - path: "src/routes/api/repos/**/*.ts"
+      instructions: |
+        - `GET` endpoints must call `isReadApiAuthorized(request)` (bearer OR same-origin).
+        - Mutation endpoints (`POST`, `PATCH`, `DELETE`) must use `isBearerAuthorized`.
+        - Path param `[id]` is user-supplied — validate as UUID; return 400 if invalid.
+        - No DDL (`CREATE TABLE`, `ALTER TABLE`) inside request handlers.
+        - Never expose raw DB error messages in API responses — wrap in generic 500 messages.
+
+    # ─── Org-wide security overview ─────────────────────────────────────────────
+    - path: "src/routes/api/security/+server.ts"
+      instructions: |
+        This endpoint exposes aggregated vulnerability data across the entire org.
+        - MUST have `isReadApiAuthorized(request)` — it currently has NO auth gate. Flag immediately.
+        - Response must not include raw secret values or private key material — only counts and severities.
+
+    # ─── All API routes (shared baseline) ───────────────────────────────────────
+    - path: "src/routes/api/**/*.ts"
+      instructions: |
+        Baseline requirements for all SvelteKit API routes:
+        - Use `$env/static/private` for all secrets — NEVER `process.env`. Accessing
+          process.env bypasses SvelteKit's build-time env validation and type safety.
+        - Return correct HTTP status codes: 400 (bad input), 401 (not authenticated),
+          403 (forbidden), 404 (not found), 500 (server error). Never return 200 on failure.
+        - Never expose stack traces, internal DB errors, or raw exception messages to callers.
+        - Validate and sanitize all URL path params and query params before use.
+        - No hardcoded tokens, API keys, or connection strings in source.
+
+    # ─── Svelte frontend pages ───────────────────────────────────────────────────
+    - path: "src/routes/**/*.svelte"
+      instructions: |
+        SvelteKit Svelte 5 frontend components:
+        - NEVER use `{@html ...}` with user-controlled or AI-generated content.
+          This includes: GitHub repo names, descriptions, README content, AI summaries,
+          and chat responses — all must be rendered as plain text (XSS risk).
+        - Chat history is persisted to `localStorage` under `repointel-org-chat-history-v1`.
+          Ensure no tokens, API secrets, or sensitive vulnerability details are written there.
+        - API calls in `load()` or `onMount()` must handle errors and not surface raw
+          server error messages in the UI.
+        - The `/security` page fans out N+1 calls to `/api/repos/[id]/security` per repo.
+          Flag any new code that increases this pattern without pagination or batching.
+        - Check for accessible HTML: interactive elements need labels/aria attributes,
+          images need `alt` text.
+        - Use Svelte 5 runes syntax (`$state`, `$derived`, `$effect`) for new reactive
+          state — do not mix with legacy `$:` reactive statements.
+
+    # ─── Auth helpers ────────────────────────────────────────────────────────────
+    - path: "lib/auth.ts"
+      instructions: |
+        Critical auth module — review carefully:
+        - `isBearerAuthorized`: must extract from `Authorization: Bearer <token>` header only.
+          Reject anything not in that exact format.
+        - `isReadApiAuthorized`: same-origin detection must check `Origin`, `Referer`,
+          AND `Sec-Fetch-Site` headers. Relying on only one is spoofable.
+        - ALL secret comparisons must use `crypto.timingSafeEqual` — never `===` for
+          comparing tokens/secrets (timing attack risk).
+        - Secrets must be read from `$env/static/private`, not `process.env`.
+        - Flag any change that adds a new bypass condition or relaxes an existing check.
+        - There must be no fallback that allows unauthenticated access to worker endpoints.
+
+    # ─── GitHub API client ───────────────────────────────────────────────────────
+    - path: "lib/github.ts"
+      instructions: |
+        GitHub App API client:
+        - JWT must be signed with RS256 (RSA-SHA256) via `crypto.createSign`. Flag any
+          change to the algorithm — using HS256 or RS512 would break GitHub App auth.
+        - Installation access tokens expire in 10 minutes — verify no code caches them
+          beyond their expiry. The `\n` → newline replacement on `GITHUB_APP_PRIVATE_KEY`
+          must be preserved (PEM format requirement).
+        - All GitHub API calls should handle rate limiting (HTTP 429 / 403 with
+          `X-RateLimit-Remaining: 0`) and surface clear errors to callers.
+        - Never log private keys, installation tokens, or JWT payloads — not even partially.
+        - `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` must come from `$env/static/private`.
+
+    # ─── Database query layer ────────────────────────────────────────────────────
+    - path: "lib/db/**/*.ts"
+      instructions: |
+        Database access layer — SQL safety is non-negotiable:
+        - ALL SQL MUST use the Neon tagged-template-literal parameterization. Zero tolerance
+          for string concatenation (`+`) or template literals (`${value}`) injected into
+          raw SQL strings — this is a SQL injection risk.
+        - UUIDs from API params must be validated before being passed to queries.
+          Use a UUID regex or `crypto.randomUUID` shape check.
+        - No DDL (`CREATE TABLE`, `ALTER TABLE`) in query files — that belongs in `migrate.ts`.
+        - Flag `ensureSecuritySuppressionTable` — move to migration, not request-time DDL.
+        - Vector similarity search must use `<=>` operator (cosine distance) matching the
+          `openai/text-embedding-3-small` 1536-dim embeddings. Flag use of `<->` (L2 distance).
+        - Queries that join `repo_security_suppressions` must correctly exclude suppressed
+          alerts — verify the LEFT JOIN / NOT EXISTS logic is correct after any schema changes.
+
+    # ─── AI / LLM / Embedding pipeline ──────────────────────────────────────────
+    - path: "lib/ai/**/*.ts"
+      instructions: |
+        AI pipeline utilities:
+        - `OPENROUTER_API_KEY` must come from `$env/static/private`.
+        - Embedding model: `openai/text-embedding-3-small` (1536 dimensions). Flag any
+          model change — different models produce incompatible vectors requiring full re-index.
+        - Chat model: `minimax/minimax-m2.5`. Flag model changes as they affect cost and output.
+        - Chunking: 1200-token chunks with 150-token overlap. Flag deviations — too-large
+          chunks exceed model context; too-small chunks degrade retrieval quality.
+        - `getEmbeddings` currently processes chunks serially. Flag new code that adds
+          more sequential embedding loops — these should be batched for performance.
+        - Token budget must be enforced — flag any prompt assembly that concatenates
+          unlimited context without a max-token guard.
+        - AI-generated text used in the UI must never be passed to `{@html}` in Svelte.
+        - All LLM calls should have a timeout and handle model API errors gracefully.
+
+    # ─── Intelligence / scoring logic ────────────────────────────────────────────
+    - path: "lib/intelligence.ts"
+      instructions: |
+        Health and security scoring:
+        - All score formulas must be deterministic and produce values in [0, 100].
+          Flag any arithmetic that could exceed these bounds.
+        - Security score must weight critical (CVSS 9.0+) and high vulnerabilities
+          heavily — a single critical vuln should cap the score at or below 20.
+        - Scoring functions must not make external API calls — they operate on
+          already-fetched/stored data only.
+        - Flag any change to scoring weights without a corresponding update to the
+          UI legend or documentation.
+
+    # ─── DB schema ───────────────────────────────────────────────────────────────
+    - path: "lib/db/schema.sql"
+      instructions: |
+        Database schema:
+        - All tables referencing `repositories` must use
+          `repo_id UUID REFERENCES repositories(id) ON DELETE CASCADE`.
+        - The `ivfflat` index on `repo_embeddings` is currently commented out.
+          If re-enabling, it MUST be created AFTER the table contains data
+          (IVFFlat requires rows to exist to build the index correctly).
+        - New tables added here need corresponding migration logic in `migrate.ts`.
+        - New columns should specify NOT NULL constraints or explicit DEFAULT values.
+        - The `repo_security_suppressions` table should be defined here and removed
+          from the lazy `ensureSecuritySuppressionTable` runtime creation pattern.
+
+    # ─── Utility scripts ─────────────────────────────────────────────────────────
+    - path: "scripts/**/*.ts"
+      instructions: |
+        - Scripts must never contain inline production credentials.
+        - Any script that modifies the database should support a `--dry-run` flag.
+        - Test scripts (e.g., `test-security.ts`) must not hit production endpoints
+          or databases — use test/staging environment variables only.
+
+  # ─── Pre-merge checks ──────────────────────────────────────────────────────────
+  pre_merge_checks:
+    title:
+      mode: "warning"
+      requirements: |
+        Title must clearly describe the change. Reject vague titles like
+        'fix', 'update', 'test', 'wip', or 'changes'.
+    description:
+      mode: "warning"
+    docstrings:
+      mode: "warning"
+      threshold: 60
+    custom_checks:
+      - name: "No hardcoded secrets or API keys"
+        mode: "error"
+        instructions: |
+          Fail if the PR introduces any hardcoded tokens, API keys, connection strings,
+          private keys, or passwords in source code. Secrets must be referenced only via
+          SvelteKit's `$env/static/private` (e.g., `GITHUB_APP_PRIVATE_KEY`,
+          `OPENROUTER_API_KEY`, `DATABASE_URL`, `QSTASH_TOKEN`).
+          Also flag any new use of `process.env` for secret variables — use
+          `$env/static/private` instead for build-time safety.
+
+      - name: "Auth gate on all security endpoints"
+        mode: "error"
+        instructions: |
+          Every API route that returns or mutates vulnerability data, secret scanning
+          alerts, or security scores MUST call `isReadApiAuthorized` (for GET) or
+          `isBearerAuthorized` (for mutations) before returning any data.
+          Currently missing: `GET /api/repos/[id]/security` and `GET /api/security`.
+          Fail if a new security-related endpoint is added without an auth check.
+
+      - name: "No SQL string interpolation"
+        mode: "error"
+        instructions: |
+          All database queries must use the Neon parameterized tagged-template literals.
+          Fail if any new query uses JavaScript string concatenation (`+`) or
+          untagged template literals (`${variable}`) to inject values into SQL.
+          This is a SQL injection risk.
+
+      - name: "No DDL in request handlers"
+        mode: "warning"
+        instructions: |
+          `CREATE TABLE`, `ALTER TABLE`, and `DROP TABLE` statements must not appear
+          inside SvelteKit `+server.ts` handler functions. Flag any use of
+          `ensureSecuritySuppressionTable` or equivalent runtime DDL patterns —
+          these belong in `lib/db/migrate.ts` and should run at deploy time, not
+          on every HTTP request.
+
+      - name: "No XSS via @html in Svelte"
+        mode: "error"
+        instructions: |
+          Fail if `{@html ...}` is used with any data from GitHub (repo names,
+          descriptions, README content, topics) or AI-generated text (summaries,
+          chat responses, audit flag messages). These must always render as plain text.
+
+  # ─── Static analysis tools ─────────────────────────────────────────────────────
+  tools:
+    # TypeScript / JavaScript linting
+    biome:
+      enabled: true
+    eslint:
+      enabled: true
+    # Secret scanning — critical for a platform that handles GitHub App private keys
+    gitleaks:
+      enabled: true
+    trufflehog:
+      enabled: true
+    # Security SAST — catches injection, auth, and crypto issues
+    semgrep:
+      enabled: true
+    # Shell scripts
+    shellcheck:
+      enabled: true
+    # YAML (this file, GitHub Actions workflows)
+    yamllint:
+      enabled: true
+    # Markdown documentation
+    markdownlint:
+      enabled: true
+    # Not applicable to this TypeScript/SvelteKit stack
+    ruff:
+      enabled: false        # Python — not used
+    phpstan:
+      enabled: false        # PHP — not used
+    rubocop:
+      enabled: false        # Ruby — not used
+    golangci-lint:
+      enabled: false        # Go — not used
+
+  finishing_touches:
+    docstrings:
+      enabled: true
+    unit_tests:
+      enabled: true
+
+  # ─── PR label automation ───────────────────────────────────────────────────────
+  labeling_instructions:
+    - label: "frontend"
+      instructions: "Apply when the PR changes Svelte components, page routes under src/routes/**/*.svelte, or client-side logic."
+    - label: "security"
+      instructions: "Apply when the PR touches auth helpers (lib/auth.ts), webhook verification, Dependabot/secret scanning sync, security scoring, or secret handling."
+    - label: "api"
+      instructions: "Apply when the PR modifies API route handlers under src/routes/api/."
+    - label: "ai-pipeline"
+      instructions: "Apply when the PR changes chunking, embedding, LLM prompts, vector search, or RAG retrieval logic in lib/ai/ or src/routes/api/workers/."
+    - label: "database"
+      instructions: "Apply when the PR modifies lib/db/schema.sql, migrate.ts, or DB query files in lib/db/."
+    - label: "workers"
+      instructions: "Apply when the PR modifies QStash worker endpoints under src/routes/api/workers/ (sync-repo, embed-repo, summarize-repo, scan-repo, reconcile)."
+    - label: "github-integration"
+      instructions: "Apply when the PR changes GitHub API calls (lib/github.ts), webhook handling, or GitHub App authentication logic."
+    - label: "config"
+      instructions: "Apply when the PR only changes configuration files: svelte.config.js, vite.config.ts, tsconfig.json, .env.example, or this file."
+  auto_apply_labels: true
+
+# ─── Chat settings ───────────────────────────────────────────────────────────────
+chat:
+  auto_reply: true    # CodeRabbit replies without needing to be @mentioned
+
+# ─── Knowledge base ──────────────────────────────────────────────────────────────
+knowledge_base:
+  opt_out: false
+  web_search:
+    enabled: true     # Allow CodeRabbit to search for CVE details, library docs, etc.
+  learnings:
+    scope: "local"    # Repo-specific learnings (vs. "global" org-wide)
+  issues:
+    scope: "local"

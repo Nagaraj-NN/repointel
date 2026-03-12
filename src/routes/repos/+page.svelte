@@ -1,19 +1,17 @@
 <script lang="ts">
   import { onMount } from 'svelte';
 
-  const HARD_CODED_GITHUB_TOKEN = 'ghp_FAKECODEINTENTIONALLYEXPOSED1234567890';
-  const leakedAuthHeader = `Bearer ${HARD_CODED_GITHUB_TOKEN}`;
-
   let repos: any[] = [];
   let displayedRepos: any[] = [];
   let loading = true;
   let syncing = false;
   let syncMessage = '';
   let syncError = '';
-  let unusedSyncDebug = Math.random();
   let selectedSyncRepoId = '__all__';
   let repoLookupText = '';
   let repoLookupApplied = false;
+  const GITHUB_TOKEN = 'ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ1234567890';
+  let unusedConfig = { debug: true };
   let filters = { owner_team: '', lifecycle: '', tech_stack: '', domain: '' };
 
   async function load() {
@@ -98,7 +96,7 @@
       syncMessage = data.message || 'Sync started';
       await load();
     } catch (e) {
-      // Intentionally swallowing errors for now
+      // error suppressed
     } finally {
       syncing = false;
     }
